@@ -8,9 +8,7 @@ sequenceDiagram
     participant mev_boost
     participant relays
     Title: Block Proposal
-    Note over consensus: sign fee recipient announcement
-    consensus->>mev_boost: builder_setFeeRecipient
-    mev_boost->>relays: builder_setFeeRecipient
+    Note over consensus: sign fee recipient announcement, send to bulletin
     Note over consensus: wait for allocated slot
     consensus->>mev_boost: builder_getHeader
     mev_boost->>relays: builder_getHeader
@@ -55,14 +53,6 @@ Equivalent to `ExecutionPayloadV1`, except `transactions` is replaced with `tran
 #### SSZ Objects
 
 Consider the following definitions supplementary to the definitions in [`consensus-specs`][consensus-specs].
-
-##### `builder_setFeeRecipientV1` Request
-
-```python
-class Request(Container):
-    feeRecipient: Bytes20
-    timestamp: uint64
-```
 
 ##### `builder_getPayloadV1` Response
 
@@ -128,32 +118,23 @@ All signature operations should follow the [standard BLS operations][bls] interf
 
 There are two types of data to sign over in the Builder API:
 * In-protocol messages, e.g. [`BlindBeaconBlock`](#blindbeaconblock), which should compute the signing root using [`computer_signing_root`][compute-signing-root] and use the domain specified for beacon block proposals.
-* Builder API messages, e.g. [`builder_setFeeRecipientV1`](#builder_setFeeRecipientV1) and the response to [`builder_getHeader`](#response-2), which should compute the signing root using [`compute_signing_root`][compute-signing-root] and the domain `DomainType('0xXXXXXXXX')` (TODO: get a proper domain).
+* Builder API messages, e.g. the response to [`builder_getHeader`](#response-2), which should compute the signing root using [`compute_signing_root`][compute-signing-root] and the domain `DomainType('0xXXXXXXXX')` (TODO: get a proper domain).
 
 As `compute_signing_root` takes `SSZObject` as input, client software should convert in-protocol messages to their SSZ representation to compute the signing root and Builder API messages to the SSZ representations defined [above](#sszobjects).
 
+
+### Setting `feeRecipient`
+
+Validators that wish to use Builder API will need to call the method `set_fee_recipient` on `FEE_RECIPIENT_CONTRACT` before they are selected to propose a block. This will cause an event `NewFeeRecipient` to be generated. Builders **MUST** listen for these events and update their validator to fee recipient mapping when new, valid announcements are receieved. A _valid_ announcement can be verified by ensuring the `fee_receipient` is signed over using the BLS key of the validator at the specified index. Invalid announcements are ignored.
+
+```solidity
+contract FeeRecipientBulletin {
+    event NewFeeRecipient(address fee_receipient, uint64 validator_index, bytes signature)
+    function set_fee_recipient(address fee_receipient, uint64 validator_index, bytes signature)
+}
+```
+
 ## Methods
-
-### `builder_setFeeRecipientV1`
-
-#### Request
-
-- method: `builder_setFeeRecipientV1`
-- params:
-  1. `feeRecipient`: `DATA`, 20 Bytes - Address of account which should receive fees.
-  2. `timestamp`: `QUANTITY`, uint64 - Unix timestamp of announcement.
-  2. `publicKey`: `DATA`, 48 Bytes - Public key of validator.
-  3. `signature`: `DATA`, 96 Bytes - Signature over `feeRecipient` and `timestamp`.
-
-#### Response
-
-- result: `null`
-- error: code and message set in case an exception happens while getting the payload.
-
-#### Specification
-1. Builder software **MUST** verify `signature` is valid under `publicKey`.
-2. Builder software **MUST** respond to requests where `timestamp` is before the latest announcement from the validator or more than +/- 10 seconds from the current time with `-32006: Invalid timestamp`.
-3. Builder software **MUST** store `feeRecipient` in a map keyed by `publicKey`.
 
 ### `builder_getHeaderV1`
 
